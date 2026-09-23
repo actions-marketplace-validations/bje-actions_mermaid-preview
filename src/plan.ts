@@ -1,0 +1,158 @@
+// Decide what to do to the pull request's review comments, from data alone:
+// the changed Markdown files with their head content and patch, and the
+// review comments already on the pull request. Pure, so every rule below is
+// tested without GitHub. `run.ts` fetches the inputs and applies the output.
+import { anchorRange, changedWithin, parsePatch } from './diff';
+import { previewLinks } from './encode';
+import { findMermaidBlocks } from './markdown';
+
+export type FileStatus =
+  | 'added'
+  | 'removed'
+  | 'modified'
+  | 'renamed'
+  | 'copied'
+  | 'changed'
+  | 'unchanged';
+
+export interface ChangedFile {
+  path: string;
+  status: FileStatus;
+  /** Added plus deleted lines; 0 for a pure rename. */
+  changes: number;
+  /** Unified diff for the file; absent when GitHub omits it (too large, or a pure rename). */
+  patch?: string | undefined;
+  /** Head content; absent for a removed, non-Markdown or unreadable file. */
+  content?: string | undefined;
+  /** Why the head content could not be read, when `content` is absent for that reason. */
+  unreadable?: string | undefined;
+}
+
+export interface ExistingComment {
+  id: number;
+  path: string;
+  body: string;
+  /** The last (or only) line of the comment's range; null once GitHub marks it outdated. */
+  line: number | null;
+  /** The first line of a multi-line comment; null for a single-line one. */
+  startLine: number | null;
+}
+
+export interface DesiredComment {
+  key: string;
+  path: string;
+  startLine: number;
+  line: number;
+  body: string;
+}
+
+export interface Plan {
+  create: DesiredComment[];
+  update: (DesiredComment & { id: number })[];
+  remove: { id: number; key: string }[];
+  /** Files skipped and why, for the job summary. */
+  skipped: { path: string; reason: string }[];
+}
+
+const MARKER_PREFIX = '<!-- mermaid-preview:';
+
+/** The identity a comment keeps across pushes: file path and block ordinal. */
+export function commentKey(path: string, ordinal: number): string {
+  return `${path}#${ordinal}`;
+}
+
+export function marker(key: string): string {
+  return `${MARKER_PREFIX} ${key} -->`;
+}
+
+export function keyOf(body: string): string | null {
+  const match = /^<!-- mermaid-preview: (.+?) -->/m.exec(body);
+  return match === null ? null : (match[1] as string);
+}
+
+export function buildBody(key: string, code: string, theme: string, partial: boolean): string {
+  const links = previewLinks(code, theme);
+  const lines = [
+    marker(key),
+    `Preview this diagram on mermaid.live: [view](${links.view}) or [edit](${links.edit}).`,
+  ];
+  if (partial) {
+    lines.push('', '_Only part of this block is in the diff, so the comment spans that part._');
+  }
+  return lines.join('\n');
+}
+
+export function isMarkdown(path: string): boolean {
+  return /\.(md|markdown|mdx)$/i.test(path);
+}
+
+export function plan(files: ChangedFile[], existing: ExistingComment[], theme: string): Plan {
+  const desired = new Map<string, DesiredComment>();
+  const skipped: Plan['skipped'] = [];
+
+  for (const file of files) {
+    if (!isMarkdown(file.path) || file.status === 'removed') continue;
+    // A pure rename has no patch and no changed block; nothing to say.
+    if (file.status === 'renamed' && file.changes === 0) continue;
+    if (file.patch === undefined) {
+      skipped.push({
+        path: file.path,
+        reason: 'GitHub returned no diff for this file (too large); open it on GitHub instead',
+      });
+      continue;
+    }
+    if (file.content === undefined) {
+      skipped.push({ path: file.path, reason: file.unreadable ?? 'head content was not read' });
+      continue;
+    }
+    const diff = parsePatch(file.patch);
+    for (const block of findMermaidBlocks(file.content)) {
+      const range = { start: block.startLine, end: block.endLine };
+      if (!changedWithin(range, diff)) continue;
+      const anchor = anchorRange(range, diff);
+      // `parsePatch` keeps `added` and `deletedBefore` subsets of `inDiff`, so
+      // a changed range always has an in-diff line and the anchor exists.
+      /* v8 ignore next */
+      if (anchor === null)
+        throw new Error(`no anchor for a changed block at ${file.path}:${range.start}`);
+      const key = commentKey(file.path, block.ordinal);
+      desired.set(key, {
+        key,
+        path: file.path,
+        startLine: anchor.start,
+        line: anchor.end,
+        body: buildBody(key, block.code, theme, anchor.partial),
+      });
+    }
+  }
+
+  const result: Plan = { create: [], update: [], remove: [], skipped };
+  const seen = new Set<string>();
+  for (const comment of existing) {
+    const key = keyOf(comment.body);
+    if (key === null) continue;
+    const want = desired.get(key);
+    // A duplicate marker (two comments for one key) keeps the first and
+    // removes the rest, so a partially applied earlier run self-heals.
+    if (want === undefined || seen.has(key)) {
+      result.remove.push({ id: comment.id, key });
+      continue;
+    }
+    seen.add(key);
+    // An outdated comment has `line: null`, so it never matches and is
+    // replaced, which is what an outdated anchor needs.
+    const startLine = comment.startLine ?? comment.line;
+    const sameRange = startLine === want.startLine && comment.line === want.line;
+    if (sameRange) {
+      if (comment.body !== want.body) result.update.push({ ...want, id: comment.id });
+    } else {
+      // The API cannot move a comment's range: replace it.
+      result.remove.push({ id: comment.id, key });
+      result.create.push(want);
+    }
+  }
+  for (const [key, want] of desired) {
+    if (!seen.has(key)) result.create.push(want);
+  }
+  return result;
+}
