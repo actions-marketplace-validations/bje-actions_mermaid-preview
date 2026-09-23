@@ -45,7 +45,7 @@ No checkout is needed: the action reads the changed files through the API. The d
 | `outcome`  | `completed`, `read-only` (the token could not write review comments and the links went to the job summary instead), or `failed`. |
 | `comments` | Number of review comments created or updated.                                                                                     |
 
-## Behaviour
+## Behavior
 
 - Only `mermaid` blocks whose lines the pull request changed get a comment. A file that
   changed elsewhere leaves its untouched diagrams alone.
@@ -63,28 +63,7 @@ No checkout is needed: the action reads the changed files through the API. The d
 
 `docs/design.md` records the reasoning behind each rule.
 
-## Publishing
-
-Releases are cut by [`brianespinosa/release-action`](https://github.com/brianespinosa/release-action)
-on every push to `main`: the next semver comes from the conventional-commit squash titles since
-the last tag, and the `v1` and `v1.N` alias tags move with each release. Squash merge is the
-only merge method enabled on this repository, which that workflow requires.
-
-The first Marketplace listing must be made by hand once: open the release in the GitHub UI and
-tick "Publish this Action to the GitHub Marketplace".
-
-## Development
-
-```bash
-pnpm install     # also installs the lefthook pre-commit hooks
-pnpm test        # vitest with coverage, 100% thresholds
-pnpm typecheck
-pnpm lint
-pnpm build       # writes dist/, which is committed; CI refuses a stale dist
-```
-
-`test/fixtures/sample.md` carries a mermaid block so a pull request that edits it exercises
-the action on itself through the smoke job in CI.
+Contributing, releases and the development setup: `CONTRIBUTING.md`.
 
 ## License
 
