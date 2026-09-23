@@ -15,11 +15,23 @@ describe('encodeState', () => {
   });
 });
 
+describe('the pinned fixtures', () => {
+  it('each decode to the diagram and theme their key names', () => {
+    for (const [key, encoded] of Object.entries(PAKO)) {
+      const [code, theme] = key.split('|');
+      const state = decode(encoded);
+      expect(state.code).toBe(code);
+      expect(JSON.parse(state.mermaid)).toEqual({ theme });
+    }
+  });
+});
+
 describe('previewLinks', () => {
   it('builds the view and edit routes from one encoding', () => {
     expect(previewLinks('graph TD', 'default')).toEqual({
       view: `https://mermaid.live/view#pako:${PAKO['graph TD|default']}`,
       edit: `https://mermaid.live/edit#pako:${PAKO['graph TD|default']}`,
+      image: `https://mermaid.ink/img/pako:${PAKO['graph TD|default']}`,
     });
   });
 });
