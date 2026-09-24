@@ -34,7 +34,7 @@ jobs:
       code-quality: write
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           # The upload attributes the report to the pull request head commit,
           # so measure that tree rather than the merge commit pull_request
@@ -90,7 +90,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Run this build against this pull request
         id: smoke
